@@ -1,8 +1,15 @@
+import platform
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import streamlit as st
 from scapy.all import rdpcap, sniff
-#from scapy.arch.windows import get_windows_if_list
+
 from detector import analyze
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# ==================================================
+# CONFIGURATION
+# ==================================================
 
 st.set_page_config(
     page_title="Passive Network Threat Detection",
@@ -21,6 +28,22 @@ THREATS = [
     "Data Exfiltration"
 ]
 
+IS_WINDOWS = platform.system().lower() == "windows"
+
+
+# ==================================================
+# WINDOWS-ONLY IMPORT
+# ==================================================
+
+if IS_WINDOWS:
+    try:
+        from scapy.arch.windows import get_windows_if_list
+    except Exception:
+        get_windows_if_list = None
+else:
+    get_windows_if_list = None
+
+
 # ==================================================
 # PAGE STYLE
 # ==================================================
@@ -31,54 +54,74 @@ st.markdown("""
     font-size:34px;
     font-weight:700;
 }
+
 .sub {
     color:#777;
     font-size:15px;
 }
+
+div.stButton > button {
+    font-weight:600;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 st.markdown(
     '<div class="title">🛡️ Passive Network Threat Detection</div>',
     unsafe_allow_html=True
 )
 
+if IS_WINDOWS:
+    subtitle = (
+        "Read-Only • PCAP/PCAPNG + Live Traffic • "
+        "No Blocking • No Injection • No Payload Decryption"
+    )
+else:
+    subtitle = (
+        "Read-Only • PCAP/PCAPNG Analysis • "
+        "No Blocking • No Injection • No Payload Decryption"
+    )
+
 st.markdown(
-    '<div class="sub">Read-Only • PCAP/PCAPNG + Live Traffic • No Blocking • No Injection • No Payload Decryption</div>',
+    f'<div class="sub">{subtitle}</div>',
     unsafe_allow_html=True
 )
 
 st.divider()
 
+
 # ==================================================
-# WINDOWS INTERFACE FUNCTIONS
+# WINDOWS NETWORK ADAPTER FUNCTIONS
 # ==================================================
 
-# def get_adapters():
+def get_adapters():
+    """Return Windows network adapters."""
+    
+    if not IS_WINDOWS or get_windows_if_list is None:
+        return []
 
-#     try:
-#         return get_windows_if_list()
-#     except Exception:
-#         return []
+    try:
+        return get_windows_if_list()
+    except Exception:
+        return []
 
 
 def real_adapters():
+    """Return usable physical/active Windows adapters."""
 
     result = []
 
-    for a in get_adapters():
+    for adapter in get_adapters():
 
-        name = a.get(
-            "name",
-            ""
-        )
+        name = adapter.get("name", "")
 
-        desc = a.get(
+        description = adapter.get(
             "description",
             ""
         ).lower()
 
-        ips = a.get(
+        ips = adapter.get(
             "ips",
             []
         )
@@ -86,79 +129,92 @@ def real_adapters():
         if not ips:
             continue
 
-        if "npcap" in desc:
+        # Ignore Npcap/filter interfaces
+        if "npcap" in description:
             continue
 
-        if "filter" in desc:
+        if "filter" in description:
             continue
 
-        if "loopback" in desc:
+        # Ignore loopback
+        if "loopback" in description:
             continue
 
-        if "virtual" in desc:
+        # Ignore virtual adapters
+        if "virtual" in description:
             continue
 
-        if "wan miniport" in desc:
+        # Ignore Windows WAN adapters
+        if "wan miniport" in description:
             continue
 
-        if "teredo" in desc:
+        if "teredo" in description:
             continue
 
-        if "6to4" in desc:
+        if "6to4" in description:
             continue
 
-        if "ip-https" in desc:
+        if "ip-https" in description:
             continue
 
-        result.append(a)
+        result.append(adapter)
 
     return result
 
 
 def find_wifi():
+    """Find the Windows Wi-Fi adapter."""
 
-    for a in real_adapters():
+    for adapter in real_adapters():
 
-        name = a.get(
+        name = adapter.get(
             "name",
             ""
         ).lower()
 
-        desc = a.get(
+        description = adapter.get(
             "description",
             ""
         ).lower()
 
         if (
             name == "wi-fi"
-            or "wifi" in desc
-            or "wireless" in desc
+            or "wifi" in description
+            or "wireless" in description
         ):
-            return a
+            return adapter
 
     return None
 
+
+# ==================================================
+# LIVE PACKET CAPTURE
+# ==================================================
 
 def capture_one(interface, duration):
 
     try:
 
-        return sniff(
+        packets = sniff(
             iface=interface,
             timeout=duration,
             store=True
         )
 
-    except Exception:
-        return []
+        return packets, None
+
+    except Exception as error:
+
+        return [], str(error)
 
 
 def capture_interfaces(interfaces, duration):
 
     packets = []
+    errors = []
 
     if not interfaces:
-        return packets
+        return packets, errors
 
     with ThreadPoolExecutor(
         max_workers=len(interfaces)
@@ -167,22 +223,28 @@ def capture_interfaces(interfaces, duration):
         jobs = [
             executor.submit(
                 capture_one,
-                iface,
+                interface,
                 duration
             )
-            for iface in interfaces
+            for interface in interfaces
         ]
 
         for job in as_completed(jobs):
 
             try:
-                packets.extend(
-                    job.result()
-                )
-            except Exception:
-                pass
 
-    return packets
+                result, error = job.result()
+
+                packets.extend(result)
+
+                if error:
+                    errors.append(error)
+
+            except Exception as error:
+
+                errors.append(str(error))
+
+    return packets, errors
 
 
 # ==================================================
@@ -197,6 +259,10 @@ def show_result(
     packet_count,
     mode
 ):
+
+    # ------------------------------------------------
+    # MAIN STATUS
+    # ------------------------------------------------
 
     if score >= 80:
 
@@ -215,6 +281,11 @@ def show_result(
         st.success(
             "✅ NETWORK APPEARS NORMAL"
         )
+
+
+    # ------------------------------------------------
+    # METRICS
+    # ------------------------------------------------
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -236,10 +307,15 @@ def show_result(
     c4.metric(
         "🔔 Alerts",
         sum(
-            v >= 60
-            for v in scores.values()
+            value >= 60
+            for value in scores.values()
         )
     )
+
+
+    # ------------------------------------------------
+    # EVIDENCE
+    # ------------------------------------------------
 
     st.subheader(
         "🔍 Detection Evidence"
@@ -247,9 +323,10 @@ def show_result(
 
     st.info(evidence)
 
-    # ==================================================
-    # GRAPH
-    # ==================================================
+
+    # ------------------------------------------------
+    # THREAT GRAPH
+    # ------------------------------------------------
 
     st.subheader(
         "📊 Threat Risk Analysis"
@@ -258,7 +335,9 @@ def show_result(
     chart_data = [
         {
             "Threat": threat,
-            "Score": int(scores.get(threat, 0))
+            "Score": int(
+                scores.get(threat, 0)
+            )
         }
         for threat in THREATS
     ]
@@ -280,6 +359,7 @@ def show_result(
                     "field": "Threat",
                     "type": "nominal",
                     "sort": "-y",
+
                     "axis": {
                         "labelAngle": -30,
                         "labelLimit": 180
@@ -297,6 +377,7 @@ def show_result(
 
                     "axis": {
                         "title": "Risk Score",
+
                         "values": [
                             0,
                             20,
@@ -315,9 +396,10 @@ def show_result(
         use_container_width=True
     )
 
-    # ==================================================
-    # SCORES
-    # ==================================================
+
+    # ------------------------------------------------
+    # DETAILED SCORES
+    # ------------------------------------------------
 
     st.subheader(
         "📋 Detailed Threat Scores"
@@ -331,14 +413,14 @@ def show_result(
 
         if value >= 80:
             icon = "🚨"
+
         elif value >= 60:
             icon = "⚠️"
+
         else:
             icon = "🟢"
 
-        c1, c2 = st.columns(
-            [5, 1]
-        )
+        c1, c2 = st.columns([5, 1])
 
         c1.write(
             f"{icon} **{threat}**"
@@ -355,9 +437,10 @@ def show_result(
             ) / 100
         )
 
-    # ==================================================
+
+    # ------------------------------------------------
     # INTERPRETATION
-    # ==================================================
+    # ------------------------------------------------
 
     st.subheader(
         "🧠 Interpretation"
@@ -374,18 +457,21 @@ def show_result(
 
         st.warning(
             "Suspicious behavior was detected. "
-            "The score is a heuristic risk score, not a probability."
+            "The score is a heuristic risk score, "
+            "not a probability."
         )
 
     else:
 
         st.success(
-            "No threat category crossed the alert threshold."
+            "No threat category crossed "
+            "the alert threshold."
         )
 
-    # ==================================================
+
+    # ------------------------------------------------
     # TECHNICAL DETAILS
-    # ==================================================
+    # ------------------------------------------------
 
     with st.expander(
         "🔬 Technical Details"
@@ -432,13 +518,28 @@ with st.sidebar:
         "⚙️ Control Panel"
     )
 
-    mode = st.radio(
-        "Analysis Mode",
-        [
-            "📁 PCAP / PCAPNG",
-            "🌐 Live Network"
-        ]
-    )
+    if IS_WINDOWS:
+
+        mode = st.radio(
+            "Analysis Mode",
+
+            [
+                "📁 PCAP / PCAPNG",
+                "🌐 Live Network"
+            ]
+        )
+
+    else:
+
+        mode = "📁 PCAP / PCAPNG"
+
+        st.info(
+            "☁️ Cloud Mode\n\n"
+            "PCAP / PCAPNG analysis is available. "
+            "Live laptop capture requires the "
+            "local Windows application."
+        )
+
 
     st.divider()
 
@@ -447,10 +548,12 @@ with st.sidebar:
     )
 
     for threat in THREATS:
+
         st.write(
             "•",
             threat
         )
+
 
     st.divider()
 
@@ -464,7 +567,7 @@ with st.sidebar:
 
 
 # ==================================================
-# PCAP MODE
+# PCAP / PCAPNG MODE
 # ==================================================
 
 if mode == "📁 PCAP / PCAPNG":
@@ -474,16 +577,19 @@ if mode == "📁 PCAP / PCAPNG":
     )
 
     st.write(
-        "Upload a network capture for passive analysis."
+        "Upload a network capture "
+        "for passive threat analysis."
     )
 
     uploaded = st.file_uploader(
         "Choose PCAP / PCAPNG file",
+
         type=[
             "pcap",
             "pcapng"
         ]
     )
+
 
     if uploaded:
 
@@ -508,6 +614,7 @@ if mode == "📁 PCAP / PCAPNG":
 
         st.divider()
 
+
         if st.button(
             "🔍 Analyze Network Capture",
             type="primary",
@@ -524,13 +631,20 @@ if mode == "📁 PCAP / PCAPNG":
                         uploaded
                     )
 
-                    attack, score, evidence, scores = analyze(
+                    (
+                        attack,
+                        score,
+                        evidence,
+                        scores
+                    ) = analyze(
                         packets
                     )
+
 
                 st.success(
                     f"✓ {len(packets):,} packets processed."
                 )
+
 
                 show_result(
                     attack,
@@ -540,6 +654,7 @@ if mode == "📁 PCAP / PCAPNG":
                     len(packets),
                     "PCAP / PCAPNG"
                 )
+
 
             except Exception as error:
 
@@ -556,26 +671,40 @@ if mode == "📁 PCAP / PCAPNG":
                     )
 
 
+    else:
+
+        st.info(
+            "👆 Upload a PCAP or PCAPNG file "
+            "to begin analysis."
+        )
+
+
 # ==================================================
-# LIVE MODE
+# LIVE NETWORK MODE
 # ==================================================
 
-else:
+elif mode == "🌐 Live Network":
 
     st.header(
         "🌐 Live Network Monitoring"
     )
 
     st.write(
-        "Passively monitor your laptop's network traffic."
+        "Passively monitor your laptop's "
+        "network traffic."
     )
 
     st.info(
         "🔒 Passive mode: traffic is only observed. "
-        "Nothing is blocked, modified, injected, or decrypted."
+        "Nothing is blocked, modified, injected, "
+        "or decrypted."
     )
 
-    # ONLY TWO OPTIONS
+
+    # ------------------------------------------------
+    # MONITORING SCOPE
+    # ------------------------------------------------
+
     option = st.radio(
         "🌐 Monitoring Scope",
 
@@ -587,23 +716,28 @@ else:
         horizontal=True
     )
 
+
     duration = st.slider(
         "⏱️ Capture Duration",
-        5,
-        60,
-        10,
-        5
+
+        min_value=5,
+        max_value=60,
+        value=10,
+        step=5
     )
+
 
     st.divider()
 
-    # ==================================================
+
+    # ------------------------------------------------
     # WIFI
-    # ==================================================
+    # ------------------------------------------------
 
     if option == "📶 WiFi":
 
         wifi = find_wifi()
+
 
         if wifi:
 
@@ -626,13 +760,15 @@ else:
 
             st.stop()
 
-    # ==================================================
+
+    # ------------------------------------------------
     # WHOLE LAPTOP
-    # ==================================================
+    # ------------------------------------------------
 
     else:
 
         adapters = real_adapters()
+
 
         if not adapters:
 
@@ -642,27 +778,23 @@ else:
 
             st.stop()
 
-        st.success(
-            f"💻 {len(adapters)} physical/active network adapter(s) available."
-        )
 
-        names = [
-            a.get(
-                "name",
-                ""
-            )
-            for a in adapters
-        ]
+        st.success(
+            f"💻 {len(adapters)} "
+            "physical/active network adapter(s) available."
+        )
 
         st.caption(
             "Monitoring active physical adapters only."
         )
 
+
     st.divider()
 
-    # ==================================================
-    # START
-    # ==================================================
+
+    # ------------------------------------------------
+    # START CAPTURE
+    # ------------------------------------------------
 
     if st.button(
         "▶️ Start Passive Capture",
@@ -672,50 +804,88 @@ else:
 
         try:
 
-            # WiFi capture
+            # =========================================
+            # WIFI CAPTURE
+            # =========================================
+
             if option == "📶 WiFi":
 
-                interface = wifi["name"]
+                interface = wifi.get("name")
 
                 st.info(
                     "📶 Capturing from Wi-Fi..."
                 )
 
+
                 with st.spinner(
                     f"Capturing for {duration} seconds..."
                 ):
 
-                    packets = capture_one(
+                    packets, error = capture_one(
                         interface,
                         duration
                     )
 
-            # Whole laptop capture
+
+                if error:
+
+                    st.error(
+                        "❌ Wi-Fi capture failed."
+                    )
+
+                    with st.expander(
+                        "🔧 Technical Error"
+                    ):
+
+                        st.code(error)
+
+                    st.stop()
+
+
+            # =========================================
+            # WHOLE LAPTOP CAPTURE
+            # =========================================
+
             else:
 
                 interfaces = [
-                    a["name"]
-                    for a in adapters
-                    if a.get("name")
+                    adapter.get("name")
+                    for adapter in adapters
+                    if adapter.get("name")
                 ]
 
+
                 st.info(
-                    f"💻 Capturing from {len(interfaces)} "
-                    "active network interface(s)..."
+                    f"💻 Capturing from "
+                    f"{len(interfaces)} active "
+                    "network interface(s)..."
                 )
+
 
                 with st.spinner(
                     f"Capturing for {duration} seconds..."
                 ):
 
-                    packets = capture_interfaces(
+                    packets, errors = capture_interfaces(
                         interfaces,
                         duration
                     )
 
-            # ==================================================
+
+                if errors:
+
+                    with st.expander(
+                        "⚠️ Capture warnings"
+                    ):
+
+                        for error in errors:
+
+                            st.code(error)
+
+
+            # =========================================
             # ANALYZE
-            # ==================================================
+            # =========================================
 
             if packets:
 
@@ -723,13 +893,20 @@ else:
                     f"✓ {len(packets):,} packets captured."
                 )
 
+
                 with st.spinner(
                     "Analyzing captured traffic..."
                 ):
 
-                    attack, score, evidence, scores = analyze(
+                    (
+                        attack,
+                        score,
+                        evidence,
+                        scores
+                    ) = analyze(
                         packets
                     )
+
 
                 show_result(
                     attack,
@@ -740,6 +917,7 @@ else:
                     option
                 )
 
+
             else:
 
                 st.warning(
@@ -747,10 +925,11 @@ else:
                 )
 
                 st.info(
-                    "Make sure your laptop is actively using "
-                    "the selected network connection and that "
-                    "Npcap is installed."
+                    "Make sure your laptop is actively "
+                    "using the selected network connection "
+                    "and that Npcap is installed."
                 )
+
 
         except Exception as error:
 
