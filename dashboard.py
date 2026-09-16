@@ -514,24 +514,18 @@ def show_result(
 
 with st.sidebar:
 
-    st.header(
-        "⚙️ Control Panel"
+    st.sidebar.header("⚙️ Control Panel")
+
+    mode = st.sidebar.radio(
+        "Select Analysis Mode",
+        ["📁 PCAP / PCAPNG", "🌐 Live Network"]
     )
 
-    if IS_WINDOWS:
-
-        mode = st.radio(
-            "Analysis Mode",
-
-            [
-                "📁 PCAP / PCAPNG",
-                "🌐 Live Network"
-            ]
-        )
-
-    else:
-
-        mode = "📁 PCAP / PCAPNG"
+    if not IS_WINDOWS:
+    #     if mode == "🌐 Live Network":
+    #         st.sidebar.warning(
+    #             "⚠️ Live Network capture requires the local Windows application."
+    #     )
 
         st.info(
             "☁️ Cloud Mode\n\n"
@@ -684,6 +678,21 @@ if mode == "📁 PCAP / PCAPNG":
 # ==================================================
 
 elif mode == "🌐 Live Network":
+
+    if not IS_WINDOWS:
+        st.header("🌐 Live Network Monitoring")
+
+        st.warning(
+            "⚠️ Live Network capture is available only "
+            "when this application is running locally on Windows."
+        )
+
+        st.info(
+            "The Streamlit Cloud server cannot access "
+            "your laptop's Wi-Fi or network adapters."
+        )
+
+        st.stop()
 
     st.header(
         "🌐 Live Network Monitoring"
