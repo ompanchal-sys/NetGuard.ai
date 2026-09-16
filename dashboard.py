@@ -1,6 +1,6 @@
 import streamlit as st
 from scapy.all import rdpcap, sniff
-from scapy.arch.windows import get_windows_if_list
+#from scapy.arch.windows import get_windows_if_list
 from detector import analyze
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -54,12 +54,12 @@ st.divider()
 # WINDOWS INTERFACE FUNCTIONS
 # ==================================================
 
-def get_adapters():
+# def get_adapters():
 
-    try:
-        return get_windows_if_list()
-    except Exception:
-        return []
+#     try:
+#         return get_windows_if_list()
+#     except Exception:
+#         return []
 
 
 def real_adapters():
