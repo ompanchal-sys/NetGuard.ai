@@ -1,9 +1,15 @@
+import platform
 import streamlit as st
 from scapy.all import rdpcap, sniff
-from scapy.arch.windows import get_windows_if_list
 from detector import analyze, extract_features
-from ml_model import predict_ml
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Windows-only Scapy adapter API.
+# Streamlit Cloud runs Linux, so NEVER import scapy.arch.windows there.
+if platform.system() == "Windows":
+    from scapy.arch.windows import get_windows_if_list
+else:
+    get_windows_if_list = None
 
 
 # =========================================================
@@ -209,7 +215,14 @@ st.markdown("""<div class="hero">
 # =========================================================
 
 def get_adapters():
-    """Safely get Windows network adapters."""
+    """Safely get Windows network adapters.
+
+    Returns an empty list on Linux/Streamlit Cloud because the Windows
+    adapter API is not available there.
+    """
+    if platform.system() != "Windows" or get_windows_if_list is None:
+        return []
+
     try:
         return get_windows_if_list()
     except Exception:
@@ -304,6 +317,11 @@ def get_ml(packets):
     try:
         if not packets:
             return "Unavailable", 0.0
+
+        # Load the ML module only when ML analysis is requested.
+        # This prevents a missing/incompatible threat_model.pkl from
+        # crashing the whole dashboard during startup.
+        from ml_model import predict_ml
 
         features = extract_features(packets)
         if not features:
@@ -514,11 +532,19 @@ with st.sidebar:
     st.divider()
     st.subheader("⚙️ Analysis Mode")
 
-    mode = st.radio(
-        "Select source",
-        ["📁 PCAP / PCAPNG", "🌐 Live Network"],
-        label_visibility="collapsed"
-    )
+    if platform.system() == "Windows":
+        mode = st.radio(
+            "Select source",
+            ["📁 PCAP / PCAPNG", "🌐 Live Network"],
+            label_visibility="collapsed"
+        )
+    else:
+        mode = st.radio(
+            "Select source",
+            ["📁 PCAP / PCAPNG"],
+            label_visibility="collapsed"
+        )
+        st.info("🌐 Live Network capture is available only when Sentinel runs locally on Windows.")
 
     st.divider()
     st.subheader("🛡️ Detection Engine")
@@ -590,6 +616,10 @@ if mode == "📁 PCAP / PCAPNG":
 # =========================================================
 
 else:
+    if platform.system() != "Windows":
+        st.error("🌐 Live Network capture is disabled on Streamlit Cloud/Linux. Run Sentinel locally on Windows for live capture.")
+        st.stop()
+
     st.header("🌐 Live Network Monitoring")
     st.write("Passively monitor your laptop's network traffic without blocking or modifying packets.")
     st.info("🔒 Passive mode: traffic is only observed. Nothing is blocked, modified, injected, or decrypted.")
