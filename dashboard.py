@@ -17,7 +17,7 @@ else:
 # =========================================================
 
 st.set_page_config(
-    page_title="Sentinel IDS",
+    page_title="NetGuard AI",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -204,7 +204,7 @@ THREATS = [
 # =========================================================
 
 st.markdown("""<div class="hero">
-<div class="hero-title">🛡️ SENTINEL</div>
+<div class="hero-title">🛡️ NetGuard AI</div>
 <div class="hero-subtitle">Passive Network Threat Detection &amp; Security Analytics</div>
 <div class="hero-subtitle">Flow-Based IDS • PCAP Analysis • Live Monitoring • Machine Learning</div>
 </div>""", unsafe_allow_html=True)
@@ -523,7 +523,7 @@ with st.sidebar:
     st.markdown(
         """<div class="sidebar-logo">
 <div class="sidebar-logo-icon">🛡️</div>
-<div class="sidebar-logo-title">SENTINEL IDS</div>
+<div class="sidebar-logo-title">NetGuard AI</div>
 <div class="sidebar-logo-sub">Passive Network Security</div>
 </div>""",
         unsafe_allow_html=True
@@ -544,7 +544,7 @@ with st.sidebar:
             ["📁 PCAP / PCAPNG"],
             label_visibility="collapsed"
         )
-        st.info("🌐 Live Network capture is available only when Sentinel runs locally on Windows.")
+        st.info("🌐 Live Network capture is available only when NetGuard AI runs locally on Windows.")
 
     st.divider()
     st.subheader("🛡️ Detection Engine")
@@ -617,7 +617,7 @@ if mode == "📁 PCAP / PCAPNG":
 
 else:
     if platform.system() != "Windows":
-        st.error("🌐 Live Network capture is disabled on Streamlit Cloud/Linux. Run Sentinel locally on Windows for live capture.")
+        st.error("🌐 Live Network capture is disabled on Streamlit Cloud/Linux. Run NetGuard AI locally on Windows for live capture.")
         st.stop()
 
     st.header("🌐 Live Network Monitoring")
@@ -709,5 +709,5 @@ else:
 # =========================================================
 
 st.markdown("""<div class="footer">
-🛡️ SENTINEL IDS &nbsp;•&nbsp; Flow-Based Detection &nbsp;•&nbsp; Machine Learning &nbsp;•&nbsp; Read-Only Security Analytics
+🛡️ NetGuard AI &nbsp;•&nbsp; Flow-Based Detection &nbsp;•&nbsp; Machine Learning &nbsp;•&nbsp; Read-Only Security Analytics
 </div>""", unsafe_allow_html=True)
